@@ -16,6 +16,13 @@
     </div>
     @endsession('success')
 
+    @session('error')
+    <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => { show = false }, 3000)" role="alert"
+        class="fixed top-5 right-5 bg-red-600 text-white text-sm p-4 rounded-lg shadow-lg z-50">
+        <p>{{ $value }}</p>
+    </div>
+    @endsession('error')
+
     <livewire:create-note />
     <livewire:edit-note />
 

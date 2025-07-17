@@ -35,7 +35,15 @@ class Notes extends Component
 
     public function deleteNote()
     {
-        Note::find($this->noteId)->delete();
+        $note = Note::find($this->noteId);
+
+        if (!$note) {
+            session()->flash('error', 'Note not found.');
+            Flux::modal('delete-note')->close();
+            return;
+        }
+
+        $note->delete();
         Flux::modal('delete-note')->close();
         session()->flash('success', 'Note deleted successfully');
         $this->redirectRoute('notes', navigate: true);
