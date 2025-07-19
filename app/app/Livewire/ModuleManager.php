@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use App\Models\Modules;
 use ZipArchive;
 
 class ModuleManager extends Component
@@ -13,6 +14,7 @@ class ModuleManager extends Component
     use WithFileUploads;
 
     public $file;
+    public $modules;
     protected $statusFilePath;
 
     public function __construct()
@@ -51,31 +53,33 @@ class ModuleManager extends Component
             $zip->extractTo($extractPath);
             $zip->close();
 
-            // Get the module name from the extracted files
             $moduleName = $this->getModuleNameFromZip($zipFilePath, $extractPath);
 
-            // Check if the module name was found
             if ($moduleName) {
-                // Ensure the module doesn't already exist in the status file
                 if ($this->isModuleExists($moduleName)) {
                     session()->flash('error', "Module '{$moduleName}' already exists!");
                     return;
                 }
 
-                // Add the new module to the status file with 'false' (disabled)
                 $this->addModuleToStatusFile($moduleName);
 
-                // Run migrations and enable the module dynamically
                 Artisan::call('module:migrate', ['module' => $moduleName, '--force' => true]);
                 Artisan::call('module:enable', ['module' => $moduleName]);
 
-                // Optionally, clear the cache
                 Artisan::call('optimize:clear');
 
-                // Remove the zip file after extraction
                 unlink($zipFilePath);
 
+                Modules::create([
+                    'name' => $moduleName,
+                    'version' => '1.0',
+                    'status' => 'inactive',  // Default status can be 'installed'
+                ]);
+
+
                 session()->flash('success', "{$moduleName} module uploaded and enabled successfully!");
+
+                // $this->redirectRoute('manage', navigate: true);
             } else {
                 session()->flash('error', 'Failed to detect module name from the ZIP file.');
             }
@@ -91,17 +95,30 @@ class ModuleManager extends Component
             return;
         }
 
+        $module = Modules::where('name', $moduleName)->first();
+
+        if (!$module) {
+            session()->flash('error', "Module '{$moduleName}' not found!");
+            return;
+        }
+
         $modulesStatus = json_decode(File::get($this->statusFilePath), true);
 
-        if (isset($modulesStatus[$moduleName])) {
-            $modulesStatus[$moduleName] = !$modulesStatus[$moduleName];
-
-            File::put($this->statusFilePath, json_encode($modulesStatus, JSON_PRETTY_PRINT));
-
-            session()->flash('success', "{$moduleName} module status updated to " . ($modulesStatus[$moduleName] ? 'enabled' : 'disabled') . '!');
-        } else {
-            session()->flash('error', "Module {$moduleName} not found in status file!");
+        if (!isset($modulesStatus[$moduleName])) {
+            session()->flash('error', "Module '{$moduleName}' not found in status file!");
+            return;
         }
+
+        $modulesStatus[$moduleName] = !$modulesStatus[$moduleName];  // Toggle between true/false
+
+        File::put($this->statusFilePath, json_encode($modulesStatus, JSON_PRETTY_PRINT));
+
+        $module->status = $modulesStatus[$moduleName] ? 'active' : 'inactive';
+        $module->save();
+
+        session()->flash('success', "{$moduleName} module status updated to " . ($modulesStatus[$moduleName] ? 'enabled' : 'disabled') . '!');
+
+        // $this->render();
     }
 
     private function getModuleNameFromZip($zipFilePath, $extractPath)
@@ -152,6 +169,10 @@ class ModuleManager extends Component
 
     public function render()
     {
-        return view('livewire.module-manager');
+        $this->modules = Modules::all();
+
+        return view('livewire.module-manager', [
+            'modules' => $this->modules
+        ]);
     }
 }

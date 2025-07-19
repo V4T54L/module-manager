@@ -28,7 +28,6 @@
                     class="border-gray-300 rounded-md px-4 py-2 text-gray-700" />
             </div>
 
-
             <div wire:loading wire:target="file">Loading...</div>
 
             @error('file')
@@ -47,6 +46,48 @@
             </div>
         </div>
     </form>
+
+    <div class="mt-8">
+        <h2 class="text-2xl font-semibold mb-4">Modules</h2>
+
+        @if ($modules->isEmpty())
+            <p>No modules found.</p>
+        @else
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-auto bg-white shadow-md rounded-lg">
+                    <thead class="bg-gray-800 text-white">
+                        <tr>
+                            <th class="px-4 py-2 text-left">ID</th>
+                            <th class="px-4 py-2 text-left">Name</th>
+                            <th class="px-4 py-2 text-left">Version</th>
+                            <th class="px-4 py-2 text-left">Status</th>
+                            <th class="px-4 py-2 text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-700">
+                        @foreach ($modules as $module)
+                            <tr class="border-t hover:bg-gray-100">
+                                <td class="px-4 py-2">{{ $module->id }}</td>
+                                <td class="px-4 py-2">{{ $module->name }}</td>
+                                <td class="px-4 py-2">{{ $module->version }}</td>
+                                <td class="px-4 py-2">
+                                    <span class="{{ $module->status == 'active' ? 'text-green-500' : 'text-red-500' }}">
+                                        {{ ucfirst($module->status) }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-2 text-center">
+                                    <flux:button wire:click="toggleModuleStatus('{{ $module->name }}')"
+                                        {{-- class="px-4 py-2 text-sm font-semibold rounded-md {{ $module->status == 'active' ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600' }}" --}}>
+                                        Toggle
+                                    </flux:button>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
     <script>
