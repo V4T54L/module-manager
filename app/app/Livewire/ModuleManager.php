@@ -16,107 +16,165 @@ class ModuleManager extends Component
     public $file;
     public $modules;
 
+    /*––– LAB –––*/
+    private const INSTALLED_STORAGE_DIR = 'app/installed';
+    /*––––––––––––*/
+
     protected $rules = [
-        'file' => 'required|file|mimes:zip|max:10240' // 10MB max size
+        'file' => 'required|file|mimes:zip|max:10240',
     ];
 
+    /* ------------------------------------------------------------------
+     |  STEP 1 — ZIP →  “installed” dir  (no composer faff yet)
+     * -----------------------------------------------------------------*/
     public function uploadFile()
     {
         $this->validate();
 
-        // save the ZIP into vendor/tmp
-        $zipPath = $this->file->store('tmp', 'local');
-        $fullZip = storage_path("app/$zipPath");
+        $originalName   = $this->file->getClientOriginalName();
+        $tempFilePath   = storage_path('app/' . $this->file->store('tmp'));   // app/tmp/XXXX.zip
+        $unzipTarget    = storage_path(self::INSTALLED_STORAGE_DIR . '/' . pathinfo($originalName, PATHINFO_FILENAME));
 
-        // temporary extraction
-        $tempPath = storage_path("app/tmp_" . now()->timestamp);
-        $this->extractTemp($fullZip, $tempPath);
+        // clean previous identical name
+        File::deleteDirectory($unzipTarget);
 
-        // module folder inside the archive  (root dir)
-        $moduleDir = collect(File::directories($tempPath))->first();   // /tmp_X/Blog
-        $moduleName = basename($moduleDir);
+        $this->extractZip($tempFilePath, $unzipTarget);
 
-        if (!$moduleDir || !$moduleName || !File::exists($moduleDir . '/module.json')) {
-            File::deleteDirectory($tempPath);
-            File::delete($fullZip);
-            session()->flash('error', 'ZIP does not contain a valid module root directory.');
+        // basic sanity check: module.json present?
+        if (!File::exists($unzipTarget . '/module.json')) {
+            File::deleteDirectory($unzipTarget);
+            session()->flash('error', "ZIP missing module.json :: rejected.");
             return;
         }
 
-        // copy to Modules/Blog
-        $target = base_path("Modules/$moduleName");
+        // OPTIONAL — checksum / manifest check here: skipped for brevity
+        $moduleName = basename($unzipTarget);
 
-        if (File::exists($target)) {
-            session()->flash('error', "Module **$moduleName** already exists.");
-            File::deleteDirectory($tempPath);
-            File::delete($fullZip);
+        try {
+            $version = $this->readVersionFromModuleFile($unzipTarget);
+        } catch (\RuntimeException $e) {
+            File::deleteDirectory($unzipTarget);
+            session()->flash('error', $e->getMessage());
             return;
         }
 
-        File::copyDirectory($moduleDir, $target);
-
-        // boot-load new code
-        Artisan::call('module:enable',  ['module' => $moduleName]);
-        Artisan::call('module:dump',                            []);
-        Artisan::call('optimize:clear',                         []);
-
-        // optional DB entry
+        // Mark as *installed* (available) but NOT yet **enabled** for the app
         Modules::updateOrCreate(
             ['name' => $moduleName],
-            ['version' => '1.0', 'status' => 'active']
+            [
+                'path_under_installed' => $moduleName,
+                'version'              => $version,
+                'status'               => 'installed',
+            ]
         );
 
-        // cleanup
-        File::deleteDirectory($tempPath);
-        File::delete($fullZip);
+        File::delete($tempFilePath);
 
-        session()->flash('success', "Module **$moduleName** installed and enabled.");
-        $this->reset('file');
+        session()->flash('success', "Module package **{$moduleName}** staged in /installed/");
     }
 
-    public function toggleModuleStatus(string $moduleName)
+    /* ------------------------------------------------------------------
+     |  STEP 2 — activate a staged package   (called from UI or API)
+     * -----------------------------------------------------------------*/
+    public function addModule(string $dirUnderInstalled)
     {
-        if (!app('modules')->find($moduleName)) {
-            session()->flash('error', "Module not found.");
+        $source = storage_path(self::INSTALLED_STORAGE_DIR . "/{$dirUnderInstalled}");
+        if (!File::exists($source)) {
+            session()->flash('error', "Selected package **{$dirUnderInstalled}** not found in /installed.");
             return;
         }
 
-        $module = Modules::where('name', $moduleName)->firstOrFail();
-        $shouldEnable = $module->status === 'inactive';
+        $destination = base_path("Modules/{$dirUnderInstalled}");
 
-        if ($shouldEnable) {
-            Artisan::call('module:enable', ['module' => $moduleName]);
-        } else {
-            Artisan::call('module:disable', ['module' => $moduleName]);
+        // Pre-check – avoid overwriting
+        if (File::exists($destination)) {
+            session()->flash('error', $dirUnderInstalled . ' already activated.');
+            return;
         }
 
-        $module->status = $shouldEnable ? 'active' : 'inactive';
-        $module->save();
+        try {
+            $version = $this->readVersionFromModuleFile($source);
+        } catch (\RuntimeException $e) {
+            session()->flash('error', $e->getMessage());
+            return;
+        }
 
-        Artisan::call('module:dump');
-        Artisan::call('optimize');
 
-        session()->flash('success', "Module **$moduleName** "
-            . ($shouldEnable ? 'enabled.' : 'disabled.'));
+        // 1. Copy tree
+        File::copyDirectory($source, $destination);
+
+        // 2. Wire-up
+        Artisan::call('module:enable',  ['module' => $dirUnderInstalled]);
+        Artisan::call('module:dump',                           []);
+        Artisan::call('optimize:clear',                        []);
+
+        // 3. Mark in admin table
+        Modules::where('name', $dirUnderInstalled)->update([
+            'status' => 'active',
+        ]);
+
+        session()->flash('success', "Module **{$dirUnderInstalled}** is now part of the application.");
     }
 
-    /* ---------------------------------------------------------
-     |  OTHER
-     * ---------------------------------------------------------*/
-    private function extractTemp(string $zip, string $dest): void
+    /* ------------------------------------------------------------------
+     |  Existing db toggle (updated to new column names / laravel-modules)
+     * -----------------------------------------------------------------*/
+    public function toggleModuleStatus(string $moduleName)
     {
-        $zipper = new ZipArchive;
-        $zipper->open($zip) === true or abort(500, 'Cannot open zip');
-        $zipper->extractTo($dest);
-        $zipper->close();
+        $module = Modules::firstWhere('name', $moduleName);
+        if (!$module) {
+            session()->flash('error', "Module not in DB.");
+            return;
+        }
+
+        if ($module->status === 'active') {
+            Artisan::call('module:disable', ['module' => $moduleName]);
+            $module->update(['status' => 'inactive']);
+            session()->flash('success', $moduleName . ' disabled.');
+        } else {
+            if (!File::exists(base_path("Modules/$moduleName"))) {
+                $this->addModule($module->path_under_installed);
+            } else {
+                Artisan::call('module:enable', ['module' => $moduleName]);
+                $module->update(['status' => 'active']);
+                session()->flash('success', $moduleName . ' enabled.');
+            }
+        }
+
+        Artisan::call('module:dump');
+    }
+
+    /* ------------------------------------------------------------------
+     | Helpers
+     * -----------------------------------------------------------------*/
+    private function extractZip(string $zipFile, string $dest): void
+    {
+        $zip = new ZipArchive;
+        $zip->open($zipFile) === true or abort(500, 'Cannot open zip');
+        $zip->extractTo($dest);
+        $zip->close();
+    }
+
+    private function readVersionFromModuleFile(string $unpackedDir)
+    {
+        $file = $unpackedDir . '/module.json';
+
+        if (!File::exists($file)) {
+            throw new \RuntimeException('module.json not found.');
+        }
+
+        $json = json_decode(File::get($file), true);
+
+        if (empty($json) || empty($json['version'])) {
+            throw new \RuntimeException('Module JSON is invalid or missing required "version" key.');
+        }
+
+        return trim($json['version']);
     }
 
     public function render()
     {
-        $this->modules = Modules::all();
-
-        return view('livewire.module-manager', [
-            'modules' => $this->modules,
-        ]);
+        $this->modules = Modules::orderBy('name')->get();
+        return view('livewire.module-manager', ['modules' => $this->modules]);
     }
 }
