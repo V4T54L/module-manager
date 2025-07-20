@@ -104,9 +104,14 @@ class ModuleManager extends Component
         File::copyDirectory($source, $destination);
 
         // 2. Wire-up
-        Artisan::call('module:enable',  ['module' => $dirUnderInstalled]);
-        Artisan::call('module:dump',                           []);
-        Artisan::call('optimize:clear',                        []);
+        try {
+            Artisan::call('module:enable',  ['module' => $dirUnderInstalled, '--no-interaction' => true,]);
+            Artisan::call('module:dump', ['--no-interaction' => true]);
+            Artisan::call('optimize:clear', ['--no-interaction' => true]);
+        } catch (\Throwable $e) {
+            session()->flash('error', 'Artisan call failed: ' . $e->getMessage());
+            return;
+        }
 
         // 3. Mark in admin table
         Modules::where('name', $dirUnderInstalled)->update([
@@ -117,8 +122,8 @@ class ModuleManager extends Component
     }
 
     /* ------------------------------------------------------------------
-     |  Existing db toggle (updated to new column names / laravel-modules)
-     * -----------------------------------------------------------------*/
+    |  Existing db toggle (updated to new column names / laravel-modules)
+    * -----------------------------------------------------------------*/
     public function toggleModuleStatus(string $moduleName)
     {
         $module = Modules::firstWhere('name', $moduleName);
@@ -128,20 +133,20 @@ class ModuleManager extends Component
         }
 
         if ($module->status === 'active') {
-            Artisan::call('module:disable', ['module' => $moduleName]);
+            Artisan::call('module:disable', ['module' => $moduleName, '--no-interaction' => true,]);
             $module->update(['status' => 'inactive']);
             session()->flash('success', $moduleName . ' disabled.');
         } else {
             if (!File::exists(base_path("Modules/$moduleName"))) {
                 $this->addModule($module->path_under_installed);
             } else {
-                Artisan::call('module:enable', ['module' => $moduleName]);
+                Artisan::call('module:enable', ['module' => $moduleName, '--no-interaction' => true,]);
                 $module->update(['status' => 'active']);
                 session()->flash('success', $moduleName . ' enabled.');
             }
         }
 
-        Artisan::call('module:dump');
+        Artisan::call('module:dump', ['--no-interaction' => true]);
     }
 
     /* ------------------------------------------------------------------
