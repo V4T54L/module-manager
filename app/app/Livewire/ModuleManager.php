@@ -22,7 +22,7 @@ class ModuleManager extends Component
     /*––––––––––––*/
 
     protected $rules = [
-        'file' => 'required|file|mimes:zip|max:10240',
+        'file' => 'required|file|mimes:zip|max:10240', // 10MB max size
     ];
 
     /*==========================================================
@@ -33,12 +33,16 @@ class ModuleManager extends Component
         $this->validate();
 
         $original = $this->file->getClientOriginalName();
-        $tmpZip   = storage_path('app/' . $this->file->store('tmp'));
+        $tmpZip   = $this->file->store('uploads', 'public');
         $target   = storage_path(self::INSTALLED_DIR . '/' . pathinfo($original, PATHINFO_FILENAME));
 
         // clean previous folder
         File::deleteDirectory($target);
-        $this->extractZip($tmpZip, $target);
+        try {
+            $this->extractZip(storage_path('app/public/' . $tmpZip), $target); // Updated here
+        } catch (\RuntimeException $e) {
+            dd("Error extracting zip file: {$e->getMessage()}");
+        }
 
         if (!File::exists($target . '/module.json')) {
             File::deleteDirectory($target);
@@ -67,6 +71,9 @@ class ModuleManager extends Component
         session()->flash('success', basename($target) . ' saved to warehouse.');
     }
 
+    /*==========================================================
+    | 2.  Toggle Module Status (enable / disable)
+    *==========================================================*/
     public function toggleModuleStatus(string $moduleName)
     {
         $module = Modules::firstWhere('name', $moduleName);
@@ -92,9 +99,8 @@ class ModuleManager extends Component
         Artisan::call('module:dump', ['--no-interaction' => true]);
     }
 
-
     /*==========================================================
-    | 2.  Stage  /  Re-Staged after upgrade/downgrade
+    | 3.  Stage  /  Re-Staged after upgrade/downgrade
     *==========================================================*/
     public function stageModule(string $moduleName)
     {
@@ -118,7 +124,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 3.  Upgrade  (higher version from warehouse -> /Modules)
+    | 4.  Upgrade  (higher version from warehouse -> /Modules)
     *==========================================================*/
     public function upgradeModule(string $moduleName)
     {
@@ -126,7 +132,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 4.  Downgrade (lower version from warehouse -> /Modules)
+    | 5.  Downgrade (lower version from warehouse -> /Modules)
     *==========================================================*/
     public function downgradeModule(string $moduleName)
     {
@@ -134,7 +140,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 5.  Unstage — rollback migrations + delete /Modules dir only
+    | 6.  Unstage — rollback migrations + delete /Modules dir only
     *==========================================================*/
     public function unstageModule(string $moduleName)
     {
@@ -156,12 +162,12 @@ class ModuleManager extends Component
         File::deleteDirectory($production);
         Modules::where('name', $moduleName)->update(['status' => 'installed']);
 
-        Artisan::call('module:dump');
+        Artisan::call('module:dump', ['--no-interaction' => true]);
         session()->flash('success', "$moduleName un-staged.");
     }
 
     /*==========================================================
-    | 6.  Delete – warehouse + DB + optionally /Modules
+    | 7.  Delete – warehouse + DB + optionally /Modules
     *==========================================================*/
     public function deleteModule(string $moduleName)
     {
@@ -212,7 +218,7 @@ class ModuleManager extends Component
             File::copyDirectory($warehouse, $production);
             Artisan::call('module:migrate', ['module' => $moduleName, '--force' => true]);
             Artisan::call('module:enable',  ['module' => $moduleName, '--no-interaction' => true]);
-            Artisan::call('module:dump');
+            Artisan::call('module:dump', ['--no-interaction' => true]);
             Artisan::call('optimize:clear');
         } catch (\Throwable $e) {
             session()->flash('error', "$mode migration issue: " . $e->getMessage());
@@ -225,18 +231,39 @@ class ModuleManager extends Component
 
     private function runPostStaging(string $moduleName)
     {
+        $module = Modules::firstWhere('name', $moduleName);
+        if (!$module) {
+            session()->flash('error', "Module not in DB.");
+            return;
+        }
         Artisan::call('module:migrate', ['module' => $moduleName, '--force' => 1]);
         Artisan::call('module:enable',  ['module' => $moduleName, '--no-interaction' => 1]);
-        Artisan::call('module:dump');
+        Artisan::call('module:dump', ['--no-interaction' => true]);
         Artisan::call('optimize:clear');
+        $module->update(['status' => 'active']);
     }
 
     private function extractZip(string $zip, string $dest)
     {
         $z = new ZipArchive;
-        $z->open($zip) === true or \abort(500, 'Cannot open ZIP');
-        $z->extractTo($dest);
-        $z->close();
+
+        // Improved error handling for opening ZIP
+        $res = $z->open($zip);
+        if ($res !== true) {
+            throw new \RuntimeException("Failed to open ZIP file at {$zip}. Error code: {$res}");
+        }
+
+        try {
+            // Ensure the destination directory exists
+            if (!File::exists($dest)) {
+                File::makeDirectory($dest, 0755, true);
+            }
+
+            // Extract the ZIP file
+            $z->extractTo($dest);
+        } finally {
+            $z->close();
+        }
     }
 
     private function readVersionFromModuleFile(string $dir)

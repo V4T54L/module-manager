@@ -20,7 +20,7 @@
             x-on:livewire-upload-error="isUploading = false"
             x-on:livewire-upload-progress="progress = $event.detail.progress">
             <div class="text-center">
-                <flux:heading size="lg" class="text-2xl font-semibold">Upload File</flux:heading>
+                <flux:heading size="lg" class="text-2xl font-semibold">Upload Module as Zip</flux:heading>
             </div>
 
             <div class="flex justify-center">
