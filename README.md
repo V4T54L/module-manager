@@ -8,5 +8,6 @@ A dynamic module management system can have a profound social impact by enabling
 <flux:navlist.item :href="route('users.home')" :current="request()->routeIs('users.home')" wire:navigate>
     {{ __('Users Home') }}</flux:navlist.item>
 ```
+3. Add field `"version": "0.1",` in the module's `module.json` file.
 
 Now we are all set to develop the plugin and share it as zip.

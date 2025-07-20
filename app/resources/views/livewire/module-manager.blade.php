@@ -61,6 +61,7 @@
                             <th class="px-4 py-2 text-left">Name</th>
                             <th class="px-4 py-2 text-left">Version</th>
                             <th class="px-4 py-2 text-left">Status</th>
+                            <th class="px-4 py-2 text-left">last_checked</th>
                             <th class="px-4 py-2 text-center">Actions</th>
                         </tr>
                     </thead>
@@ -75,11 +76,28 @@
                                         {{ ucfirst($module->status) }}
                                     </span>
                                 </td>
+                                <td class="px-4 py-2">
+                                    @if ($module->last_checked)
+                                        {{ $module->last_checked->diffForHumans() }}
+                                    @else
+                                        —
+                                    @endif
+                                </td>
+
                                 <td class="px-4 py-2 text-center">
                                     <flux:button wire:click="toggleModuleStatus('{{ $module->name }}')"
                                         {{-- class="px-4 py-2 text-sm font-semibold rounded-md {{ $module->status == 'active' ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600' }}" --}}>
                                         Toggle
                                     </flux:button>
+                                    <flux:button wire:click="stageModule('{{ $module->name }}')">Stage</flux:button>
+                                    <flux:button wire:click="upgradeModule('{{ $module->name }}')">Upgrade
+                                    </flux:button>
+                                    <flux:button wire:click="downgradeModule('{{ $module->name }}')">Downgrade
+                                    </flux:button>
+                                    <flux:button wire:click="unstageModule('{{ $module->name }}')">Unstage
+                                    </flux:button>
+                                    <flux:button wire:click="deleteModule('{{ $module->name }}')">Delete</flux:button>
+
                                 </td>
                             </tr>
                         @endforeach

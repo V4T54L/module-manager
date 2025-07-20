@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('version');
             $table->string('status'); // e.g., 'installed', 'active', 'inactive'
             $table->string('path_under_installed')->nullable();
+            $table->timestamp('last_checked')->nullable();
             $table->timestamps();
         });
     }

@@ -7,5 +7,6 @@
     "providers": [
         "Modules\\Users\\Providers\\UsersServiceProvider"
     ],
+    "version": "0.1",
     "files": []
 }
