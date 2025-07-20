@@ -19,17 +19,17 @@
                     wire:navigate>{{ __('Dashboard') }}</flux:navlist.item>
                 <flux:navlist.item icon="book-open" :href="route('notes')" :current="request()->routeIs('notes')"
                     wire:navigate>{{ __('Notes') }}</flux:navlist.item>
-                <flux:navlist.item :href="route('manage')" :current="request()->routeIs('manage')"
-                    wire:navigate>{{ __('Modules') }}</flux:navlist.item>
-                {{-- @foreach ($modules as $module)
-                    @if ($module->status === 'active')
-                        <!-- Only show active modules -->
-                        <flux:navlist.item :href="route($module->name . '.index')"
-                            :current="request()->routeIs($module->name . '.index')" wire:navigate>
-                            {{ __($module->name) }}
-                        </flux:navlist.item>
+                <flux:navlist.item :href="route('manage')" :current="request()->routeIs('manage')" wire:navigate>
+                    {{ __('Manage Modules') }}</flux:navlist.item>
+
+                {{-- I need clear separation here; maybe categorize them as Installed Modules --}}
+
+                @foreach (Module::collections() as $module)
+                    @if ($module->isEnabled())
+                        @includeIf("{$module->getLowerName()}::menu")
                     @endif
-                @endforeach --}}
+                    {{-- <flux:button class="">{{ $module->getLowerName() }}</flux:button> --}}
+                @endforeach
             </flux:navlist.group>
         </flux:navlist>
 
