@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Livewire\Component;
 use Livewire\WithFileUploads;
-use App\Models\Modules;
+use App\Models\ModuleState;
 use ZipArchive;
 use Illuminate\Support\Facades\Storage;
 
@@ -26,17 +26,17 @@ class ModuleManager extends Component
     ];
 
     /*==========================================================
-    | 1.  ZIP  →  warehouse  (stored, NOT yet used)
+    | 1. ZIP → warehouse (stored, NOT yet used)
     *==========================================================*/
     public function uploadFile()
     {
         $this->validate();
 
         $original = $this->file->getClientOriginalName();
-        $tmpZip   = $this->file->store('uploads', 'public');
-        $target   = storage_path(self::INSTALLED_DIR . '/' . pathinfo($original, PATHINFO_FILENAME));
+        $tmpZip = $this->file->store('uploads', 'public');
+        $target = storage_path(self::INSTALLED_DIR . '/' . pathinfo($original, PATHINFO_FILENAME));
 
-        // clean previous folder
+        // Clean previous folder
         File::deleteDirectory($target);
         try {
             $this->extractZip(storage_path('app/public/' . $tmpZip), $target); // Updated here
@@ -58,12 +58,11 @@ class ModuleManager extends Component
             return;
         }
 
-        Modules::updateOrCreate(
+        // Create or update the module in the database with 'enabled' as false by default
+        ModuleState::updateOrCreate(
             ['name' => basename($target)],
             [
-                'path_under_installed' => basename($target),
-                'version'              => $version,
-                'status'               => 'installed',
+                'enabled' => false, // Defaulting to 'false' (disabled)
             ]
         );
 
@@ -72,40 +71,42 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 2.  Toggle Module Status (enable / disable)
+    | 2. Toggle Module Status (enable / disable)
     *==========================================================*/
     public function toggleModuleStatus(string $moduleName)
     {
-        $module = Modules::firstWhere('name', $moduleName);
+        $module = ModuleState::firstWhere('name', $moduleName);
         if (!$module) {
-            session()->flash('error', "Module not in DB.");
+            session()->flash('error', "Module not found in DB.");
             return;
         }
 
-        if ($module->status === 'active') {
+        if ($module->enabled) {
             Artisan::call('module:disable', ['module' => $moduleName, '--no-interaction' => true]);
-            $module->update(['status' => 'inactive']);
+            $module->update(['enabled' => false]); // Disable module
             session()->flash('success', $moduleName . ' disabled.');
         } else {
             if (!File::exists(base_path("Modules/$moduleName"))) {
+                // You might need to stage the module here
                 // $this->stageModule($module->path_under_installed);
             } else {
                 Artisan::call('module:enable', ['module' => $moduleName, '--no-interaction' => true]);
-                $module->update(['status' => 'active']);
+                $module->update(['enabled' => true]); // Enable module
                 session()->flash('success', $moduleName . ' enabled.');
             }
         }
 
         Artisan::call('module:dump', ['--no-interaction' => true]);
+        $this->redirectRoute('manage', navigate: true);
     }
 
     /*==========================================================
-    | 3.  Stage  /  Re-Staged after upgrade/downgrade
+    | 3. Stage / Re-Staged after upgrade/downgrade
     *==========================================================*/
     public function stageModule(string $moduleName)
     {
-        $warehouse   = storage_path(self::INSTALLED_DIR . '/' . $moduleName);
-        $production  = base_path("Modules/$moduleName");
+        $warehouse = storage_path(self::INSTALLED_DIR . '/' . $moduleName);
+        $production = base_path("Modules/$moduleName");
 
         if (!File::exists($warehouse)) {
             session()->flash('error', "$moduleName not in warehouse.");
@@ -124,7 +125,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 4.  Upgrade  (higher version from warehouse -> /Modules)
+    | 4. Upgrade (higher version from warehouse -> /Modules)
     *==========================================================*/
     public function upgradeModule(string $moduleName)
     {
@@ -132,7 +133,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 5.  Downgrade (lower version from warehouse -> /Modules)
+    | 5. Downgrade (lower version from warehouse -> /Modules)
     *==========================================================*/
     public function downgradeModule(string $moduleName)
     {
@@ -140,7 +141,7 @@ class ModuleManager extends Component
     }
 
     /*==========================================================
-    | 6.  Unstage — rollback migrations + delete /Modules dir only
+    | 6. Unstage — rollback migrations + delete /Modules dir only
     *==========================================================*/
     public function unstageModule(string $moduleName)
     {
@@ -154,20 +155,20 @@ class ModuleManager extends Component
 
         /* run rollback inside production folder before deleting */
         try {
-            Artisan::call('module:migrate:rollback', ['module' => $moduleName, '--force' => true]);
+            Artisan::call('module:migrate:rollback', ['name' => $moduleName, '--force' => true]);
         } catch (\Throwable $e) {
             /* swallow or warn */
         }
 
         File::deleteDirectory($production);
-        Modules::where('name', $moduleName)->update(['status' => 'installed']);
+        ModuleState::where('name', $moduleName)->update(['enabled' => false]); // Set 'enabled' to false
 
         Artisan::call('module:dump', ['--no-interaction' => true]);
         session()->flash('success', "$moduleName un-staged.");
     }
 
     /*==========================================================
-    | 7.  Delete – warehouse + DB + optionally /Modules
+    | 7. Delete – warehouse + DB + optionally /Modules
     *==========================================================*/
     public function deleteModule(string $moduleName)
     {
@@ -179,7 +180,7 @@ class ModuleManager extends Component
         $warehouse = storage_path(self::INSTALLED_DIR . '/' . $moduleName);
         File::deleteDirectory($warehouse);
 
-        Modules::where('name', $moduleName)->delete();
+        ModuleState::where('name', $moduleName)->delete();
 
         session()->flash('success', "$moduleName completely deleted.");
     }
@@ -187,7 +188,7 @@ class ModuleManager extends Component
     /*───────────────────── helper gas-gas ─────────────────────*/
     private function upgradeOrDowngrade(string $moduleName, string $mode)
     {
-        $warehouse  = storage_path(self::INSTALLED_DIR . '/' . $moduleName);
+        $warehouse = storage_path(self::INSTALLED_DIR . '/' . $moduleName);
         $production = base_path("Modules/$moduleName");
 
         if (!File::exists($warehouse)) {
@@ -199,11 +200,11 @@ class ModuleManager extends Component
             return;
         }
 
-        $new  = $this->readVersionFromModuleFile($warehouse);
+        $new = $this->readVersionFromModuleFile($warehouse);
         $curr = $this->readVersionFromModuleFile($production);
 
         $cmp = version_compare($new, $curr);
-        if ($mode === 'upgrade'   && $cmp <= 0) {
+        if ($mode === 'upgrade' && $cmp <= 0) {
             session()->flash('error', "Version $new must be higher than $curr.");
             return;
         }
@@ -213,11 +214,11 @@ class ModuleManager extends Component
         }
 
         try {
-            Artisan::call('module:migrate:rollback', ['module' => $moduleName, '--force' => true]);
+            Artisan::call('module:migrate:rollback', ['name' => $moduleName, '--force' => true]);
             File::deleteDirectory($production);
             File::copyDirectory($warehouse, $production);
-            Artisan::call('module:migrate', ['module' => $moduleName, '--force' => true]);
-            Artisan::call('module:enable',  ['module' => $moduleName, '--no-interaction' => true]);
+            Artisan::call('module:migrate', ['name' => $moduleName, '--force' => true]);
+            Artisan::call('module:enable', ['name' => $moduleName, '--no-interaction' => true]);
             Artisan::call('module:dump', ['--no-interaction' => true]);
             Artisan::call('optimize:clear');
         } catch (\Throwable $e) {
@@ -225,22 +226,22 @@ class ModuleManager extends Component
             return;
         }
 
-        Modules::where('name', $moduleName)->update(['version' => $new, 'status' => 'active']);
+        ModuleState::where('name', $moduleName)->update(['enabled' => true, 'version' => $new]);
         session()->flash('success', "$moduleName $mode" . "d to $new.");
     }
 
     private function runPostStaging(string $moduleName)
     {
-        $module = Modules::firstWhere('name', $moduleName);
+        $module = ModuleState::firstWhere('module', $moduleName);
         if (!$module) {
-            session()->flash('error', "Module not in DB.");
+            session()->flash('error', "Module not found in DB.");
             return;
         }
-        Artisan::call('module:migrate', ['module' => $moduleName, '--force' => 1]);
-        Artisan::call('module:enable',  ['module' => $moduleName, '--no-interaction' => 1]);
+        Artisan::call('module:migrate', ['name' => $moduleName, '--force' => 1]);
+        Artisan::call('module:enable', ['name' => $moduleName, '--no-interaction' => 1]);
         Artisan::call('module:dump', ['--no-interaction' => true]);
         Artisan::call('optimize:clear');
-        $module->update(['status' => 'active']);
+        $module->update(['enabled' => true]); // Set 'enabled' to true
     }
 
     private function extractZip(string $zip, string $dest)
@@ -279,7 +280,7 @@ class ModuleManager extends Component
 
     public function render()
     {
-        $this->modules = Modules::orderBy('name')->get();
+        $this->modules = ModuleState::orderBy('name')->get();
         return view('livewire.module-manager', ['modules' => $this->modules]);
     }
 }

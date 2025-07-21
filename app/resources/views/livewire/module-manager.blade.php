@@ -61,7 +61,7 @@
                             <th class="px-4 py-2 text-left">Name</th>
                             <th class="px-4 py-2 text-left">Version</th>
                             <th class="px-4 py-2 text-left">Status</th>
-                            <th class="px-4 py-2 text-left">last_checked</th>
+                            <th class="px-4 py-2 text-left">Last Checked</th>
                             <th class="px-4 py-2 text-center">Actions</th>
                         </tr>
                     </thead>
@@ -69,11 +69,12 @@
                         @foreach ($modules as $module)
                             <tr class="border-t hover:bg-gray-100">
                                 <td class="px-4 py-2">{{ $module->id }}</td>
-                                <td class="px-4 py-2">{{ $module->name }}</td>
-                                <td class="px-4 py-2">{{ $module->version }}</td>
+                                <td class="px-4 py-2">{{ $module->name }}</td> <!-- 'name' -> 'module' -->
+                                <td class="px-4 py-2">{{ $module->version ?? 'N/A' }}</td>
+                                <!-- Add version display if available -->
                                 <td class="px-4 py-2">
-                                    <span class="{{ $module->status == 'active' ? 'text-green-500' : 'text-red-500' }}">
-                                        {{ ucfirst($module->status) }}
+                                    <span class="{{ $module->enabled ? 'text-green-500' : 'text-red-500' }}">
+                                        {{ $module->enabled ? 'Active' : 'Inactive' }}
                                     </span>
                                 </td>
                                 <td class="px-4 py-2">
@@ -85,10 +86,13 @@
                                 </td>
 
                                 <td class="px-4 py-2 text-center">
+                                    <!-- Toggle Button for Enabling/Disabling Module -->
                                     <flux:button wire:click="toggleModuleStatus('{{ $module->name }}')"
-                                        {{-- class="px-4 py-2 text-sm font-semibold rounded-md {{ $module->status == 'active' ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600' }}" --}}>
+                                        class="px-4 py-2 text-sm font-semibold rounded-md {{ $module->enabled ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600' }}">
                                         Toggle
                                     </flux:button>
+
+                                    <!-- Other Actions -->
                                     <flux:button wire:click="stageModule('{{ $module->name }}')">Stage</flux:button>
                                     <flux:button wire:click="upgradeModule('{{ $module->name }}')">Upgrade
                                     </flux:button>
@@ -97,7 +101,6 @@
                                     <flux:button wire:click="unstageModule('{{ $module->name }}')">Unstage
                                     </flux:button>
                                     <flux:button wire:click="deleteModule('{{ $module->name }}')">Delete</flux:button>
-
                                 </td>
                             </tr>
                         @endforeach

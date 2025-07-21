@@ -1,5 +1,6 @@
 <?php
 
+use App\Activators\DbActivator;
 use Nwidart\Modules\Activators\FileActivator;
 use Nwidart\Modules\Providers\ConsoleServiceProvider;
 
@@ -288,11 +289,16 @@ return [
     | The file activator will store the activation status in storage/installed_modules
     */
     'activators' => [
+        'db' => [
+            'class' => DbActivator::class,
+            'cache-key' => 'activator.installed',
+        ],
+
         'file' => [
             'class' => FileActivator::class,
             'statuses-file' => base_path('modules_statuses.json'),
         ],
     ],
 
-    'activator' => 'file',
+    'activator' => 'db',
 ];
